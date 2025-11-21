@@ -30,9 +30,13 @@ import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityStatuses;
 import net.minecraft.entity.EntityType;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.projectile.thrown.EnderPearlEntity;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.network.packet.s2c.play.BlockBreakingProgressS2CPacket;
+import net.minecraft.world.GameMode;
 import net.minecraft.network.packet.s2c.play.EntityStatusS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerRemoveS2CPacket;
@@ -221,6 +225,65 @@ public class Notifier extends Module {
         .build()
     );
 
+    private final Setting<Boolean> discordIncludeGameMode = sgDiscord.add(new BoolSetting.Builder()
+        .name("include-game-mode")
+        .description("Include player game mode in detection notifications.")
+        .defaultValue(true)
+        .visible(() -> discordWebhookEnabled.get() && discordPlayerDetection.get())
+        .build()
+    );
+
+    private final Setting<Boolean> discordIncludeEquipment = sgDiscord.add(new BoolSetting.Builder()
+        .name("include-equipment")
+        .description("Include player armor and items in detection notifications.")
+        .defaultValue(true)
+        .visible(() -> discordWebhookEnabled.get() && discordPlayerDetection.get())
+        .build()
+    );
+
+    private final Setting<Boolean> discordIncludeElytra = sgDiscord.add(new BoolSetting.Builder()
+        .name("include-elytra")
+        .description("Include elytra status and flying state in detection notifications.")
+        .defaultValue(true)
+        .visible(() -> discordWebhookEnabled.get() && discordPlayerDetection.get())
+        .build()
+    );
+
+    private final Setting<Boolean> discordPlayerLogout = sgDiscord.add(new BoolSetting.Builder()
+        .name("player-logout")
+        .description("Send Discord notification with player logout positions.")
+        .defaultValue(false)
+        .visible(discordWebhookEnabled::get)
+        .build()
+    );
+
+    private final Setting<Boolean> discordPlayerDamage = sgDiscord.add(new BoolSetting.Builder()
+        .name("player-damage")
+        .description("Send Discord notification when players take damage.")
+        .defaultValue(false)
+        .visible(discordWebhookEnabled::get)
+        .build()
+    );
+
+    private final Setting<Boolean> discordIgnoreOwnDamage = sgDiscord.add(new BoolSetting.Builder()
+        .name("ignore-own-damage")
+        .description("Ignore your own damage for Discord notifications.")
+        .defaultValue(true)
+        .visible(() -> discordWebhookEnabled.get() && discordPlayerDamage.get())
+        .build()
+    );
+
+    private final Setting<Double> discordMinDamage = sgDiscord.add(new DoubleSetting.Builder()
+        .name("min-damage")
+        .description("Minimum damage to trigger notification.")
+        .defaultValue(2.0)
+        .min(0.5)
+        .max(20.0)
+        .sliderRange(0.5, 20.0)
+        .visible(() -> discordWebhookEnabled.get() && discordPlayerDamage.get())
+        .build()
+    );
+
     private final Setting<Boolean> discordTotemPops = sgDiscord.add(new BoolSetting.Builder()
         .name("totem-pops")
         .description("Send Discord notification for totem pops.")
@@ -330,6 +393,7 @@ public class Notifier extends Module {
     private final Map<UUID, String> deathMessages = new HashMap<>();
     private final Set<Integer> trackedEntityIds = new HashSet<>();
     private final Map<BlockPos, UUID> blockBreakers = new HashMap<>();
+    private final Map<UUID, Float> playerHealth = new HashMap<>();
 
     private final Random random = new Random();
 
@@ -343,6 +407,9 @@ public class Notifier extends Module {
     private void onEntityAdded(EntityAddedEvent event) {
         // Discord webhook for player detection (independent of visualRange setting)
         if (event.entity instanceof PlayerEntity player && !event.entity.getUuid().equals(mc.player.getUuid())) {
+            // Track player health for damage detection
+            playerHealth.put(player.getUuid(), player.getHealth());
+
             if (discordWebhookEnabled.get() && discordPlayerDetection.get() && !webhookUrl.get().isEmpty()) {
                 if ((!visualRangeIgnoreFriends.get() || !Friends.get().isFriend(player)) && (!visualRangeIgnoreFakes.get() || !(event.entity instanceof FakePlayerEntity))) {
                     sendPlayerDetectionWebhook(player, true);
@@ -384,9 +451,22 @@ public class Notifier extends Module {
     private void onEntityRemoved(EntityRemovedEvent event) {
         // Discord webhook for player detection (independent of visualRange setting)
         if (event.entity instanceof PlayerEntity player && !event.entity.getUuid().equals(mc.player.getUuid())) {
-            if (discordWebhookEnabled.get() && discordPlayerDetection.get() && !webhookUrl.get().isEmpty()) {
-                if ((!visualRangeIgnoreFriends.get() || !Friends.get().isFriend(player)) && (!visualRangeIgnoreFakes.get() || !(event.entity instanceof FakePlayerEntity))) {
-                    sendPlayerDetectionWebhook(player, false);
+            // Remove from health tracking
+            playerHealth.remove(player.getUuid());
+
+            if (discordWebhookEnabled.get() && !webhookUrl.get().isEmpty()) {
+                // Send player left detection
+                if (discordPlayerDetection.get()) {
+                    if ((!visualRangeIgnoreFriends.get() || !Friends.get().isFriend(player)) && (!visualRangeIgnoreFakes.get() || !(event.entity instanceof FakePlayerEntity))) {
+                        sendPlayerDetectionWebhook(player, false);
+                    }
+                }
+
+                // Send logout position notification
+                if (discordPlayerLogout.get()) {
+                    if ((!visualRangeIgnoreFriends.get() || !Friends.get().isFriend(player)) && (!visualRangeIgnoreFakes.get() || !(event.entity instanceof FakePlayerEntity))) {
+                        sendPlayerLogoutWebhook(player);
+                    }
                 }
             }
         }
@@ -453,6 +533,7 @@ public class Notifier extends Module {
         deathMessages.clear();
         trackedEntityIds.clear();
         blockBreakers.clear();
+        playerHealth.clear();
     }
 
     @Override
@@ -464,6 +545,7 @@ public class Notifier extends Module {
         deathMessages.clear();
         trackedEntityIds.clear();
         blockBreakers.clear();
+        playerHealth.clear();
     }
 
     @EventHandler
@@ -478,6 +560,7 @@ public class Notifier extends Module {
         deathMessages.clear();
         trackedEntityIds.clear();
         blockBreakers.clear();
+        playerHealth.clear();
     }
 
     @EventHandler
@@ -683,6 +766,31 @@ public class Notifier extends Module {
                     }
                 }
             }
+
+            // Track player damage
+            if (discordPlayerDamage.get()) {
+                for (PlayerEntity player : mc.world.getPlayers()) {
+                    if (discordIgnoreOwnDamage.get() && player.equals(mc.player)) continue;
+                    if (visualRangeIgnoreFriends.get() && Friends.get().isFriend(player)) continue;
+                    if (player instanceof FakePlayerEntity) continue;
+
+                    UUID uuid = player.getUuid();
+                    float currentHealth = player.getHealth();
+
+                    if (playerHealth.containsKey(uuid)) {
+                        float lastHealth = playerHealth.get(uuid);
+                        float damage = lastHealth - currentHealth;
+
+                        // Only notify if damage is positive (took damage) and above threshold
+                        if (damage > 0 && damage >= discordMinDamage.get()) {
+                            sendPlayerDamageWebhook(player, damage, currentHealth);
+                        }
+                    }
+
+                    // Update stored health
+                    playerHealth.put(uuid, currentHealth);
+                }
+            }
         }
     }
 
@@ -732,13 +840,62 @@ public class Notifier extends Module {
             .setTitle(title)
             .setDescription(description)
             .setColor(entered ? new java.awt.Color(0, 255, 0) : new java.awt.Color(255, 0, 0))
-            .addField("Player", player.getName().getString(), true)
-            .addField("Position", String.format("X: %d, Y: %d, Z: %d",
+            .addField("Player", player.getName().getString(), true);
+
+        // Add game mode if enabled
+        if (discordIncludeGameMode.get() && entered) {
+            PlayerListEntry entry = mc.player.networkHandler.getPlayerListEntry(player.getUuid());
+            if (entry != null && entry.getGameMode() != null) {
+                embed.addField("Game Mode", entry.getGameMode().getName(), true);
+            }
+        }
+
+        embed.addField("Position", String.format("X: %d, Y: %d, Z: %d",
                 player.getBlockPos().getX(),
                 player.getBlockPos().getY(),
                 player.getBlockPos().getZ()), true)
-            .addField("Distance", String.format("%.1f blocks", PlayerUtils.distanceTo(player)), true)
-            .addField("Server", getServerIP(), false)
+            .addField("Distance", String.format("%.1f blocks", PlayerUtils.distanceTo(player)), true);
+
+        // Add equipment if enabled
+        if (discordIncludeEquipment.get() && entered) {
+            ItemStack helmet = player.getEquippedStack(EquipmentSlot.HEAD);
+            ItemStack chestplate = player.getEquippedStack(EquipmentSlot.CHEST);
+            ItemStack leggings = player.getEquippedStack(EquipmentSlot.LEGS);
+            ItemStack boots = player.getEquippedStack(EquipmentSlot.FEET);
+            ItemStack mainHand = player.getEquippedStack(EquipmentSlot.MAINHAND);
+            ItemStack offHand = player.getEquippedStack(EquipmentSlot.OFFHAND);
+
+            StringBuilder armorText = new StringBuilder();
+            if (!helmet.isEmpty()) armorText.append("⛑️ ").append(helmet.getName().getString()).append("\n");
+            if (!chestplate.isEmpty()) armorText.append("🛡️ ").append(chestplate.getName().getString()).append("\n");
+            if (!leggings.isEmpty()) armorText.append("👖 ").append(leggings.getName().getString()).append("\n");
+            if (!boots.isEmpty()) armorText.append("👢 ").append(boots.getName().getString()).append("\n");
+
+            if (armorText.length() > 0) {
+                embed.addField("Armor", armorText.toString().trim(), false);
+            }
+
+            if (!mainHand.isEmpty()) {
+                embed.addField("Main Hand", mainHand.getName().getString(), true);
+            }
+            if (!offHand.isEmpty()) {
+                embed.addField("Off Hand", offHand.getName().getString(), true);
+            }
+        }
+
+        // Add elytra status if enabled
+        if (discordIncludeElytra.get() && entered) {
+            ItemStack chestplate = player.getEquippedStack(EquipmentSlot.CHEST);
+            boolean wearingElytra = chestplate.isOf(Items.ELYTRA);
+            boolean isFlyingWithElytra = player.isFallFlying();
+
+            if (wearingElytra) {
+                String elytraStatus = isFlyingWithElytra ? "✈️ Flying with Elytra" : "Wearing Elytra (not flying)";
+                embed.addField("Elytra", elytraStatus, true);
+            }
+        }
+
+        embed.addField("Server", getServerIP(), false)
             .setTimestamp(java.time.Instant.now().toString());
 
         webhook.addEmbed(embed);
@@ -904,6 +1061,62 @@ public class Notifier extends Module {
                 pos.getX(),
                 pos.getY(),
                 pos.getZ()), false)
+            .addField("Distance to You", String.format("%.1f blocks", PlayerUtils.distanceTo(player)), true)
+            .addField("Server", getServerIP(), false)
+            .setTimestamp(java.time.Instant.now().toString());
+
+        webhook.addEmbed(embed);
+        webhook.send();
+    }
+
+    private void sendPlayerLogoutWebhook(PlayerEntity player) {
+        String description = String.format("**%s** has logged out!",
+            player.getName().getString());
+
+        DiscordWebhook webhook = new DiscordWebhook(webhookUrl.get());
+        webhook.setUsername("Meteor Notifier");
+
+        DiscordWebhook.Embed embed = new DiscordWebhook.Embed()
+            .setTitle("Player Logout")
+            .setDescription(description)
+            .setColor(new java.awt.Color(255, 69, 0))
+            .addField("Player", player.getName().getString(), true)
+            .addField("Logout Position", String.format("X: %d, Y: %d, Z: %d",
+                player.getBlockPos().getX(),
+                player.getBlockPos().getY(),
+                player.getBlockPos().getZ()), false)
+            .addField("Distance from You", String.format("%.1f blocks", PlayerUtils.distanceTo(player)), true)
+            .addField("Server", getServerIP(), false)
+            .setTimestamp(java.time.Instant.now().toString());
+
+        webhook.addEmbed(embed);
+        webhook.send();
+    }
+
+    private void sendPlayerDamageWebhook(PlayerEntity player, float damage, float currentHealth) {
+        String description = String.format("**%s** took **%.1f** damage!",
+            player.getName().getString(),
+            damage);
+
+        DiscordWebhook webhook = new DiscordWebhook(webhookUrl.get());
+        webhook.setUsername("Meteor Notifier");
+
+        // Color based on severity: green (low damage) to red (high damage)
+        int red = Math.min(255, (int) (damage * 25));
+        int green = Math.max(0, 255 - (int) (damage * 25));
+        java.awt.Color color = new java.awt.Color(red, green, 0);
+
+        DiscordWebhook.Embed embed = new DiscordWebhook.Embed()
+            .setTitle("Player Took Damage")
+            .setDescription(description)
+            .setColor(color)
+            .addField("Player", player.getName().getString(), true)
+            .addField("Damage", String.format("%.1f ❤", damage), true)
+            .addField("Health Remaining", String.format("%.1f / %.1f ❤", currentHealth, player.getMaxHealth()), true)
+            .addField("Position", String.format("X: %d, Y: %d, Z: %d",
+                player.getBlockPos().getX(),
+                player.getBlockPos().getY(),
+                player.getBlockPos().getZ()), false)
             .addField("Distance to You", String.format("%.1f blocks", PlayerUtils.distanceTo(player)), true)
             .addField("Server", getServerIP(), false)
             .setTimestamp(java.time.Instant.now().toString());
