@@ -217,6 +217,13 @@ public class Notifier extends Module {
         .build()
     );
 
+    private final Setting<List<String>> whitelistedPlayers = sgDiscord.add(new StringListSetting.Builder()
+        .name("whitelisted-players")
+        .description("Players in this list will not trigger any Discord notifications.")
+        .visible(discordWebhookEnabled::get)
+        .build()
+    );
+
     private final Setting<Boolean> discordPlayerDetection = sgDiscord.add(new BoolSetting.Builder()
         .name("player-detection")
         .description("Send Discord notification when a player enters render distance.")
@@ -411,7 +418,7 @@ public class Notifier extends Module {
             playerHealth.put(player.getUuid(), player.getHealth());
 
             if (discordWebhookEnabled.get() && discordPlayerDetection.get() && !webhookUrl.get().isEmpty()) {
-                if ((!visualRangeIgnoreFriends.get() || !Friends.get().isFriend(player)) && (!visualRangeIgnoreFakes.get() || !(event.entity instanceof FakePlayerEntity))) {
+                if (!isWhitelisted(player) && (!visualRangeIgnoreFriends.get() || !Friends.get().isFriend(player)) && (!visualRangeIgnoreFakes.get() || !(event.entity instanceof FakePlayerEntity))) {
                     sendPlayerDetectionWebhook(player, true);
                 }
             }
@@ -454,7 +461,7 @@ public class Notifier extends Module {
             // Remove from health tracking
             playerHealth.remove(player.getUuid());
 
-            if (discordWebhookEnabled.get() && !webhookUrl.get().isEmpty()) {
+            if (discordWebhookEnabled.get() && !webhookUrl.get().isEmpty() && !isWhitelisted(player)) {
                 // Send player left detection
                 if (discordPlayerDetection.get()) {
                     if ((!visualRangeIgnoreFriends.get() || !Friends.get().isFriend(player)) && (!visualRangeIgnoreFakes.get() || !(event.entity instanceof FakePlayerEntity))) {
@@ -511,7 +518,7 @@ public class Notifier extends Module {
                         info("(highlight)%s's(default) pearl landed at %d, %d, %d (highlight)(%.1fm away, travelled %.1fm)(default).", pearl.getOwner().getName().getString(), pearl.getBlockPos().getX(), pearl.getBlockPos().getY(), pearl.getBlockPos().getZ(), pearl.distanceTo(mc.player), d);
 
                         // Send Discord webhook notification for pearls
-                        if (discordWebhookEnabled.get() && discordPearls.get() && !webhookUrl.get().isEmpty()) {
+                        if (discordWebhookEnabled.get() && discordPearls.get() && !webhookUrl.get().isEmpty() && !isWhitelisted(p)) {
                             sendPearlWebhook(p, pearl, d);
                         }
                     }
@@ -600,7 +607,7 @@ public class Notifier extends Module {
                     ChatUtils.sendMsg(getChatId(entity), Formatting.GRAY, "(highlight)%s (default)popped (highlight)%d (default)%s.", entity.getName().getString(), pops, pops == 1 ? "totem" : "totems");
 
                     // Send Discord webhook notification for totem pops
-                    if (discordWebhookEnabled.get() && discordTotemPops.get() && !webhookUrl.get().isEmpty()) {
+                    if (discordWebhookEnabled.get() && discordTotemPops.get() && !webhookUrl.get().isEmpty() && !isWhitelisted(entity)) {
                         sendTotemPopWebhook(entity, pops);
                     }
                 }
@@ -671,6 +678,11 @@ public class Notifier extends Module {
                         return;
                     }
 
+                    // Check if player is whitelisted
+                    if (isWhitelisted(breaker)) {
+                        return;
+                    }
+
                     // Check if block is in tracked list (if list is not empty)
                     List<Block> trackedBlocks = discordTrackedBlocks.get();
                     if (!trackedBlocks.isEmpty() && !trackedBlocks.contains(oldState.getBlock())) {
@@ -726,7 +738,7 @@ public class Notifier extends Module {
                         recentDeaths.add(uuid);
                         boolean isOwnPlayer = player.equals(mc.player);
 
-                        if ((isOwnPlayer && discordPlayerDeath.get()) || (!isOwnPlayer && discordOtherPlayerDeath.get())) {
+                        if (!isWhitelisted(player) && ((isOwnPlayer && discordPlayerDeath.get()) || (!isOwnPlayer && discordOtherPlayerDeath.get()))) {
                             String deathMessage = deathMessages.getOrDefault(uuid, null);
                             sendPlayerDeathWebhook(player, isOwnPlayer, deathMessage);
                         }
@@ -749,6 +761,7 @@ public class Notifier extends Module {
                     if (discordIgnoreOwnMovement.get() && player.equals(mc.player)) continue;
                     if (visualRangeIgnoreFriends.get() && Friends.get().isFriend(player)) continue;
                     if (player instanceof FakePlayerEntity) continue;
+                    if (isWhitelisted(player)) continue;
 
                     UUID uuid = player.getUuid();
                     Vec3d currentPos = new Vec3d(player.getX(), player.getY(), player.getZ());
@@ -773,6 +786,7 @@ public class Notifier extends Module {
                     if (discordIgnoreOwnDamage.get() && player.equals(mc.player)) continue;
                     if (visualRangeIgnoreFriends.get() && Friends.get().isFriend(player)) continue;
                     if (player instanceof FakePlayerEntity) continue;
+                    if (isWhitelisted(player)) continue;
 
                     UUID uuid = player.getUuid();
                     float currentHealth = player.getHealth();
@@ -805,6 +819,17 @@ public class Notifier extends Module {
             return "Singleplayer";
         }
         return "Unknown";
+    }
+
+    private boolean isWhitelisted(PlayerEntity player) {
+        if (player == null) return false;
+        String playerName = player.getName().getString();
+        for (String whitelistedName : whitelistedPlayers.get()) {
+            if (whitelistedName.equalsIgnoreCase(playerName)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean isDeathMessage(String message) {
