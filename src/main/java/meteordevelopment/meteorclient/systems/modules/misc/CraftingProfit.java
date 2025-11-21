@@ -342,7 +342,7 @@ public class CraftingProfit extends Module {
             info("Top 5 crafts by profit:");
             for (int i = 0; i < Math.min(5, allCrafts.size()); i++) {
                 ProfitableCraft craft = allCrafts.get(i);
-                info("  " + (i+1) + ". " + craft.toString());
+                info("  %d. %s", (i+1), craft.toString());
             }
         }
     }
