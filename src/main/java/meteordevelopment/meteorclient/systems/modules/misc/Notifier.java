@@ -12,6 +12,7 @@ import meteordevelopment.meteorclient.events.entity.EntityRemovedEvent;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
+import meteordevelopment.meteorclient.events.world.BlockUpdateEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.friends.Friends;
@@ -22,15 +23,20 @@ import meteordevelopment.meteorclient.utils.network.DiscordWebhook;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityStatuses;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.projectile.thrown.EnderPearlEntity;
+import net.minecraft.network.packet.s2c.play.BlockBreakingProgressS2CPacket;
 import net.minecraft.network.packet.s2c.play.EntityStatusS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerRemoveS2CPacket;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.MutableText;
@@ -290,6 +296,29 @@ public class Notifier extends Module {
         .build()
     );
 
+    private final Setting<Boolean> discordBlockBreaking = sgDiscord.add(new BoolSetting.Builder()
+        .name("block-breaking")
+        .description("Send Discord notification when players break blocks.")
+        .defaultValue(false)
+        .visible(discordWebhookEnabled::get)
+        .build()
+    );
+
+    private final Setting<Boolean> discordIgnoreOwnBlockBreaking = sgDiscord.add(new BoolSetting.Builder()
+        .name("ignore-own-block-breaking")
+        .description("Ignore your own block breaking for Discord notifications.")
+        .defaultValue(true)
+        .visible(() -> discordWebhookEnabled.get() && discordBlockBreaking.get())
+        .build()
+    );
+
+    private final Setting<Set<net.minecraft.block.Block>> discordTrackedBlocks = sgDiscord.add(new BlockListSetting.Builder()
+        .name("tracked-blocks")
+        .description("Only notify when these blocks are broken. Leave empty to track all blocks.")
+        .visible(() -> discordWebhookEnabled.get() && discordBlockBreaking.get())
+        .build()
+    );
+
     private int timer;
     private boolean loginPacket = true;
     private final Object2IntMap<UUID> totemPopMap = new Object2IntOpenHashMap<>();
@@ -300,6 +329,7 @@ public class Notifier extends Module {
     private final Set<UUID> recentDeaths = new HashSet<>();
     private final Map<UUID, String> deathMessages = new HashMap<>();
     private final Set<Integer> trackedEntityIds = new HashSet<>();
+    private final Map<BlockPos, UUID> blockBreakers = new HashMap<>();
 
     private final Random random = new Random();
 
@@ -422,6 +452,7 @@ public class Notifier extends Module {
         recentDeaths.clear();
         deathMessages.clear();
         trackedEntityIds.clear();
+        blockBreakers.clear();
     }
 
     @Override
@@ -432,6 +463,7 @@ public class Notifier extends Module {
         recentDeaths.clear();
         deathMessages.clear();
         trackedEntityIds.clear();
+        blockBreakers.clear();
     }
 
     @EventHandler
@@ -445,6 +477,7 @@ public class Notifier extends Module {
         recentDeaths.clear();
         deathMessages.clear();
         trackedEntityIds.clear();
+        blockBreakers.clear();
     }
 
     @EventHandler
@@ -505,7 +538,66 @@ public class Notifier extends Module {
                 }
             }
 
+            case BlockBreakingProgressS2CPacket packet when discordWebhookEnabled.get() && discordBlockBreaking.get() && !webhookUrl.get().isEmpty() -> {
+                // Track which player is breaking which block
+                int entityId = packet.getEntityId();
+                BlockPos pos = packet.getPos();
+                int progress = packet.getProgress();
+
+                // Find the player entity by ID
+                Entity entity = mc.world.getEntityById(entityId);
+                if (entity instanceof PlayerEntity player) {
+                    if (progress >= 0 && progress < 10) {
+                        // Player is actively breaking this block
+                        blockBreakers.put(pos, player.getUuid());
+                    } else if (progress < 0) {
+                        // Breaking was cancelled or finished
+                        blockBreakers.remove(pos);
+                    }
+                }
+            }
+
             default -> {}
+        }
+    }
+
+    @EventHandler
+    private void onBlockUpdate(BlockUpdateEvent event) {
+        // Detect when blocks are broken (old block is not air, new block is air)
+        if (!discordWebhookEnabled.get() || !discordBlockBreaking.get() || webhookUrl.get().isEmpty()) return;
+
+        BlockState oldState = event.oldState;
+        BlockState newState = event.newState;
+        BlockPos pos = event.pos;
+
+        // Check if a block was broken (became air)
+        if (!oldState.isAir() && newState.isAir()) {
+            UUID breakerUuid = blockBreakers.remove(pos);
+            if (breakerUuid != null) {
+                PlayerEntity breaker = null;
+                for (PlayerEntity player : mc.world.getPlayers()) {
+                    if (player.getUuid().equals(breakerUuid)) {
+                        breaker = player;
+                        break;
+                    }
+                }
+
+                if (breaker != null) {
+                    // Check if we should ignore this player
+                    if (breaker.equals(mc.player) && discordIgnoreOwnBlockBreaking.get()) {
+                        return;
+                    }
+
+                    // Check if block is in tracked list (if list is not empty)
+                    Set<Block> trackedBlocks = discordTrackedBlocks.get();
+                    if (!trackedBlocks.isEmpty() && !trackedBlocks.contains(oldState.getBlock())) {
+                        return;
+                    }
+
+                    // Send webhook notification
+                    sendBlockBreakingWebhook(breaker, oldState.getBlock(), pos);
+                }
+            }
         }
     }
 
@@ -786,6 +878,33 @@ public class Notifier extends Module {
                 player.getBlockPos().getY(),
                 player.getBlockPos().getZ()), true)
             .addField("Current Distance to You", String.format("%.1f blocks", PlayerUtils.distanceTo(player)), true)
+            .addField("Server", getServerIP(), false)
+            .setTimestamp(java.time.Instant.now().toString());
+
+        webhook.addEmbed(embed);
+        webhook.send();
+    }
+
+    private void sendBlockBreakingWebhook(PlayerEntity player, Block block, BlockPos pos) {
+        String blockName = block.getName().getString();
+        String description = String.format("**%s** broke **%s**!",
+            player.getName().getString(),
+            blockName);
+
+        DiscordWebhook webhook = new DiscordWebhook(webhookUrl.get());
+        webhook.setUsername("Meteor Notifier");
+
+        DiscordWebhook.Embed embed = new DiscordWebhook.Embed()
+            .setTitle("Block Broken")
+            .setDescription(description)
+            .setColor(new java.awt.Color(139, 69, 19))
+            .addField("Player", player.getName().getString(), true)
+            .addField("Block", blockName, true)
+            .addField("Position", String.format("X: %d, Y: %d, Z: %d",
+                pos.getX(),
+                pos.getY(),
+                pos.getZ()), false)
+            .addField("Distance to You", String.format("%.1f blocks", PlayerUtils.distanceTo(player)), true)
             .addField("Server", getServerIP(), false)
             .setTimestamp(java.time.Instant.now().toString());
 
