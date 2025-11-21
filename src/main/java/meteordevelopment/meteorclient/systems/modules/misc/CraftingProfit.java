@@ -49,18 +49,9 @@ public class CraftingProfit extends Module {
         .build()
     );
 
-    private final Setting<Integer> maxPages = sgGeneral.add(new IntSetting.Builder()
-        .name("max-pages")
-        .description("Maximum number of auction house pages to fetch (100 listings per page).")
-        .defaultValue(100)
-        .min(1)
-        .sliderMax(200)
-        .build()
-    );
-
     private final Setting<Integer> pageDelay = sgGeneral.add(new IntSetting.Builder()
-        .name("page-delay")
-        .description("Delay between page fetches in milliseconds (to respect rate limits).")
+        .name("query-delay")
+        .description("Delay between item queries in milliseconds (to respect rate limits).")
         .defaultValue(250)
         .min(100)
         .sliderMax(1000)
@@ -178,96 +169,90 @@ public class CraftingProfit extends Module {
 
     private void fetchAuctionData() {
         itemPrices.clear();
-        int currentPage = 1;
-        int totalListings = 0;
-        int maxPagesToFetch = maxPages.get();
 
-        info("Starting to fetch auction house data (max " + maxPagesToFetch + " pages)...");
+        // Get all unique item IDs from recipes
+        Set<String> itemsToQuery = new HashSet<>();
+        List<CraftingRecipe> recipes = RecipeDatabase.getAllRecipes();
 
-        while (currentPage <= maxPagesToFetch) {
-            info("Fetching page " + currentPage + "...");
-
-            DonutAuctionResponse response = fetchAuctionPage(currentPage);
-
-            // Check if we got a valid response
-            if (response == null || response.status != 200) {
-                if (currentPage == 1) {
-                    throw new RuntimeException("Failed to fetch auction data - check your API key!");
-                }
-                // No more pages available
-                info("No more pages available at page " + currentPage);
-                break;
-            }
-
-            // Check if the page has any results
-            if (response.result == null || response.result.isEmpty()) {
-                // No more listings
-                info("Reached end of auction listings at page " + currentPage);
-                break;
-            }
-
-            // Process this page
-            int pageListings = response.result.size();
-            totalListings += pageListings;
-            processAuctionPage(response);
-
-            info("Page " + currentPage + ": Processed " + pageListings + " listings (" + itemPrices.size() + " unique items so far)");
-
-            // If we got fewer than expected listings, we might be on the last page
-            // Most APIs use 50 or 100 items per page
-            if (pageListings < 10) {
-                // Likely the last page
-                info("Received fewer than 10 listings, assuming last page");
-                break;
-            }
-
-            currentPage++;
-
-            // Rate limiting: Use configurable delay
-            // Default 250ms = 4 req/sec, well under 250 req/min limit
-            if (currentPage <= maxPagesToFetch) {
-                try {
-                    Thread.sleep(pageDelay.get());
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    warning("Page fetching interrupted");
-                    break;
-                }
+        for (CraftingRecipe recipe : recipes) {
+            // Add result item
+            itemsToQuery.add(CraftingRecipe.normalizeId(recipe.resultId));
+            // Add all ingredient items
+            for (String ingredientId : recipe.ingredients.keySet()) {
+                itemsToQuery.add(CraftingRecipe.normalizeId(ingredientId));
             }
         }
 
-        int pagesFetched = currentPage - 1;
-        info("Completed! Fetched " + pagesFetched + " pages with " + totalListings + " total listings");
+        info("Querying lowest prices for " + itemsToQuery.size() + " unique items...");
+
+        int queriedCount = 0;
+        int foundCount = 0;
+        int notFoundCount = 0;
+
+        for (String itemId : itemsToQuery) {
+            queriedCount++;
+
+            // Progress update every 50 items
+            if (queriedCount % 50 == 0) {
+                info("Progress: " + queriedCount + "/" + itemsToQuery.size() + " items queried (" + foundCount + " found)");
+            }
+
+            Double lowestPrice = fetchLowestPriceForItem(itemId);
+
+            if (lowestPrice != null) {
+                itemPrices.put(itemId, lowestPrice);
+                foundCount++;
+            } else {
+                notFoundCount++;
+            }
+
+            // Rate limiting: Use configurable delay
+            try {
+                Thread.sleep(pageDelay.get());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                warning("Price fetching interrupted");
+                break;
+            }
+        }
+
+        info("Completed! Queried " + queriedCount + " items: " + foundCount + " found, " + notFoundCount + " not on auction house");
         info("Tracking lowest prices for " + itemPrices.size() + " unique items");
     }
 
-    private DonutAuctionResponse fetchAuctionPage(int page) {
+    private Double fetchLowestPriceForItem(String itemId) {
         try {
-            String url = "https://api.donutsmp.net/v1/auction/list/" + page;
+            // Query first page sorted by lowest price for this specific item
+            String url = "https://api.donutsmp.net/v1/auction/list/1";
+
+            // Create search request body (API uses GET with body, which is non-standard but supported)
+            String requestBody = "{\"search\":\"" + itemId + "\",\"sort\":\"lowest_price\"}";
+
             DonutAuctionResponse response = Http.get(url)
                 .bearer(apiKey.get())
+                .bodyString(requestBody)
+                .header("Content-Type", "application/json")
                 .sendJson(DonutAuctionResponse.class);
 
-            if (response != null && response.status == 200) {
-                return response;
+            if (response != null && response.status == 200 && response.result != null && !response.result.isEmpty()) {
+                // Get the first result (lowest price)
+                DonutAuctionResponse.AuctionEntry firstEntry = response.result.get(0);
+
+                // Verify the item ID matches what we searched for
+                if (firstEntry.item != null && firstEntry.item.id != null) {
+                    String entryItemId = CraftingRecipe.normalizeId(firstEntry.item.id);
+                    if (entryItemId.equalsIgnoreCase(itemId)) {
+                        // Calculate price per item
+                        double pricePerItem = firstEntry.price / firstEntry.item.count;
+                        return pricePerItem;
+                    }
+                }
             }
-            return null;
+
+            return null; // Item not found or no results
         } catch (Exception e) {
-            throw new RuntimeException("API request failed: " + e.getMessage());
-        }
-    }
-
-    private void processAuctionPage(DonutAuctionResponse response) {
-        if (response.result == null) return;
-
-        for (DonutAuctionResponse.AuctionEntry entry : response.result) {
-            if (entry.item == null || entry.item.id == null) continue;
-
-            String itemId = CraftingRecipe.normalizeId(entry.item.id);
-            double pricePerItem = entry.price / entry.item.count;
-
-            // Store the lowest price for each item
-            itemPrices.merge(itemId, pricePerItem, Math::min);
+            // Silently skip items that cause errors
+            return null;
         }
     }
 
