@@ -85,7 +85,7 @@ public class CraftingProfitScreenImpl extends WindowScreen {
             craftTable.add(theme.label("Recipe")).expandCellX();
             craftTable.row();
 
-            craftTable.add(theme.horizontalSeparator()).expandCellX().colspan(7);
+            craftTable.add(theme.horizontalSeparator()).expandCellX();
             craftTable.row();
 
             // Craft rows

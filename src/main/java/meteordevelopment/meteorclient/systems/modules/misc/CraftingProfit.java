@@ -2,13 +2,13 @@ package meteordevelopment.meteorclient.systems.modules.misc;
 
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.gui.GuiTheme;
+import meteordevelopment.meteorclient.gui.GuiThemes;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Categories;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.misc.donutsmp.*;
-import meteordevelopment.meteorclient.utils.Utils;
-import meteordevelopment.meteorclient.utils.misc.MeteorExecutor;
 import meteordevelopment.meteorclient.utils.network.Http;
+import meteordevelopment.meteorclient.utils.network.MeteorExecutor;
 import meteordevelopment.orbit.EventHandler;
 
 import java.util.*;
@@ -274,7 +274,7 @@ public class CraftingProfit extends Module {
         if (mc.currentScreen instanceof CraftingProfitScreenImpl) {
             return; // Already open
         }
-        mc.setScreen(new CraftingProfitScreenImpl(Utils.getGuiTheme(), this));
+        mc.setScreen(new CraftingProfitScreenImpl(GuiThemes.get(), this));
     }
 
     // Getters for GUI
