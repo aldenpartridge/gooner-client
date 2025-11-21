@@ -174,7 +174,7 @@ public class CraftingProfit extends Module {
 
                 // Open GUI after refresh completes (if setting enabled)
                 if (openGuiOnActivate.get()) {
-                    mc.execute(this::openGui);
+                    openGui(); // openGui() handles thread safety
                 }
             } catch (Exception e) {
                 lastError = e.getMessage();
@@ -371,6 +371,12 @@ public class CraftingProfit extends Module {
     }
 
     public void openGui() {
+        // Ensure we're on the main thread
+        if (!mc.isOnThread()) {
+            mc.execute(this::openGui);
+            return;
+        }
+
         if (mc.currentScreen instanceof CraftingProfitScreenImpl) {
             return; // Already open
         }
