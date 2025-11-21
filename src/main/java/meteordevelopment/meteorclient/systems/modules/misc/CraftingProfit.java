@@ -49,6 +49,24 @@ public class CraftingProfit extends Module {
         .build()
     );
 
+    private final Setting<Integer> maxPages = sgGeneral.add(new IntSetting.Builder()
+        .name("max-pages")
+        .description("Maximum number of auction house pages to fetch (100 listings per page).")
+        .defaultValue(100)
+        .min(1)
+        .sliderMax(200)
+        .build()
+    );
+
+    private final Setting<Integer> pageDelay = sgGeneral.add(new IntSetting.Builder()
+        .name("page-delay")
+        .description("Delay between page fetches in milliseconds (to respect rate limits).")
+        .defaultValue(250)
+        .min(100)
+        .sliderMax(1000)
+        .build()
+    );
+
     // Filter settings
     private final Setting<Double> minProfit = sgFilters.add(new DoubleSetting.Builder()
         .name("min-profit")
@@ -160,20 +178,67 @@ public class CraftingProfit extends Module {
 
     private void fetchAuctionData() {
         itemPrices.clear();
-        info("Fetching page 1 of auction data...");
+        int currentPage = 1;
+        int totalListings = 0;
+        int maxPagesToFetch = maxPages.get();
 
-        // Fetch first page to see how much data we need
-        DonutAuctionResponse firstPage = fetchAuctionPage(1);
-        if (firstPage == null || firstPage.result == null) {
-            throw new RuntimeException("Failed to fetch auction data - check your API key!");
+        info("Starting to fetch auction house data (max " + maxPagesToFetch + " pages)...");
+
+        while (currentPage <= maxPagesToFetch) {
+            info("Fetching page " + currentPage + "...");
+
+            DonutAuctionResponse response = fetchAuctionPage(currentPage);
+
+            // Check if we got a valid response
+            if (response == null || response.status != 200) {
+                if (currentPage == 1) {
+                    throw new RuntimeException("Failed to fetch auction data - check your API key!");
+                }
+                // No more pages available
+                info("No more pages available at page " + currentPage);
+                break;
+            }
+
+            // Check if the page has any results
+            if (response.result == null || response.result.isEmpty()) {
+                // No more listings
+                info("Reached end of auction listings at page " + currentPage);
+                break;
+            }
+
+            // Process this page
+            int pageListings = response.result.size();
+            totalListings += pageListings;
+            processAuctionPage(response);
+
+            info("Page " + currentPage + ": Processed " + pageListings + " listings (" + itemPrices.size() + " unique items so far)");
+
+            // If we got fewer than expected listings, we might be on the last page
+            // Most APIs use 50 or 100 items per page
+            if (pageListings < 10) {
+                // Likely the last page
+                info("Received fewer than 10 listings, assuming last page");
+                break;
+            }
+
+            currentPage++;
+
+            // Rate limiting: Use configurable delay
+            // Default 250ms = 4 req/sec, well under 250 req/min limit
+            if (currentPage <= maxPagesToFetch) {
+                try {
+                    Thread.sleep(pageDelay.get());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    warning("Page fetching interrupted");
+                    break;
+                }
+            }
         }
 
-        processAuctionPage(firstPage);
-
-        // For now, we'll just fetch the first page
-        // In a production system, you might want to fetch multiple pages
-        // but be careful about rate limits (250 req/min)
-        info("Processed " + itemPrices.size() + " unique items from auction house.");
+        int pagesFetched = currentPage - 1;
+        info("Completed! Fetched " + pagesFetched + " pages with " + totalListings + " total listings");
+        info("Tracking lowest prices for " + itemPrices.size() + " unique items");
     }
 
     private DonutAuctionResponse fetchAuctionPage(int page) {
