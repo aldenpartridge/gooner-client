@@ -297,7 +297,9 @@ public class Notifier extends Module {
     private final Map<Integer, Vec3d> pearlStartPosMap = new HashMap<>();
     private final ArrayListDeque<Text> messageQueue = new ArrayListDeque<>();
     private final Map<UUID, Vec3d> playerPositions = new HashMap<>();
-    private final Map<UUID, String> lastDeathMessages = new HashMap<>();
+    private final Set<UUID> recentDeaths = new HashSet<>();
+    private final Map<UUID, String> deathMessages = new HashMap<>();
+    private final Set<Integer> trackedEntityIds = new HashSet<>();
 
     private final Random random = new Random();
 
@@ -309,6 +311,23 @@ public class Notifier extends Module {
 
     @EventHandler
     private void onEntityAdded(EntityAddedEvent event) {
+        // Discord webhook for player detection (independent of visualRange setting)
+        if (event.entity instanceof PlayerEntity player && !event.entity.getUuid().equals(mc.player.getUuid())) {
+            if (discordWebhookEnabled.get() && discordPlayerDetection.get() && !webhookUrl.get().isEmpty()) {
+                if ((!visualRangeIgnoreFriends.get() || !Friends.get().isFriend(player)) && (!visualRangeIgnoreFakes.get() || !(event.entity instanceof FakePlayerEntity))) {
+                    sendPlayerDetectionWebhook(player, true);
+                }
+            }
+        }
+
+        // Track entities for death detection
+        if (discordWebhookEnabled.get() && discordEntityDeath.get() && !webhookUrl.get().isEmpty()) {
+            if (!(event.entity instanceof PlayerEntity) && discordEntityTypes.get().contains(event.entity.getType())) {
+                trackedEntityIds.add(event.entity.getId());
+            }
+        }
+
+        // Regular visual range notifications
         if (!event.entity.getUuid().equals(mc.player.getUuid()) && entities.get().contains(event.entity.getType()) && visualRange.get() && this.event.get() != Event.Despawn) {
             if (event.entity instanceof PlayerEntity player) {
                 if ((!visualRangeIgnoreFriends.get() || !Friends.get().isFriend(player)) && (!visualRangeIgnoreFakes.get() || !(event.entity instanceof FakePlayerEntity))) {
@@ -316,11 +335,6 @@ public class Notifier extends Module {
 
                     if (visualMakeSound.get())
                         mc.world.playSoundFromEntity(mc.player, mc.player, SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, SoundCategory.AMBIENT, 3.0F, 1.0F);
-
-                    // Send Discord webhook notification
-                    if (discordWebhookEnabled.get() && discordPlayerDetection.get() && !webhookUrl.get().isEmpty()) {
-                        sendPlayerDetectionWebhook(player, true);
-                    }
                 }
             } else {
                 MutableText text = Text.literal(event.entity.getType().getName().getString()).formatted(Formatting.WHITE);
@@ -338,6 +352,27 @@ public class Notifier extends Module {
 
     @EventHandler
     private void onEntityRemoved(EntityRemovedEvent event) {
+        // Discord webhook for player detection (independent of visualRange setting)
+        if (event.entity instanceof PlayerEntity player && !event.entity.getUuid().equals(mc.player.getUuid())) {
+            if (discordWebhookEnabled.get() && discordPlayerDetection.get() && !webhookUrl.get().isEmpty()) {
+                if ((!visualRangeIgnoreFriends.get() || !Friends.get().isFriend(player)) && (!visualRangeIgnoreFakes.get() || !(event.entity instanceof FakePlayerEntity))) {
+                    sendPlayerDetectionWebhook(player, false);
+                }
+            }
+        }
+
+        // Check for entity death
+        if (discordWebhookEnabled.get() && discordEntityDeath.get() && !webhookUrl.get().isEmpty()) {
+            if (!(event.entity instanceof PlayerEntity) && trackedEntityIds.contains(event.entity.getId())) {
+                trackedEntityIds.remove(event.entity.getId());
+                // Send death notification for tracked entities
+                if (discordEntityTypes.get().contains(event.entity.getType())) {
+                    sendEntityDeathWebhook(event.entity);
+                }
+            }
+        }
+
+        // Regular visual range notifications
         if (!event.entity.getUuid().equals(mc.player.getUuid()) && entities.get().contains(event.entity.getType()) && visualRange.get() && this.event.get() != Event.Spawn) {
             if (event.entity instanceof PlayerEntity player) {
                 if ((!visualRangeIgnoreFriends.get() || !Friends.get().isFriend(player)) && (!visualRangeIgnoreFakes.get() || !(event.entity instanceof FakePlayerEntity))) {
@@ -345,11 +380,6 @@ public class Notifier extends Module {
 
                     if (visualMakeSound.get())
                         mc.world.playSoundFromEntity(mc.player, mc.player, SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, SoundCategory.AMBIENT, 3.0F, 1.0F);
-
-                    // Send Discord webhook notification
-                    if (discordWebhookEnabled.get() && discordPlayerDetection.get() && !webhookUrl.get().isEmpty()) {
-                        sendPlayerDetectionWebhook(player, false);
-                    }
                 }
             } else {
                 MutableText text = Text.literal(event.entity.getType().getName().getString()).formatted(Formatting.WHITE);
@@ -389,7 +419,9 @@ public class Notifier extends Module {
         chatIdMap.clear();
         pearlStartPosMap.clear();
         playerPositions.clear();
-        lastDeathMessages.clear();
+        recentDeaths.clear();
+        deathMessages.clear();
+        trackedEntityIds.clear();
     }
 
     @Override
@@ -397,7 +429,9 @@ public class Notifier extends Module {
         timer = 0;
         messageQueue.clear();
         playerPositions.clear();
-        lastDeathMessages.clear();
+        recentDeaths.clear();
+        deathMessages.clear();
+        trackedEntityIds.clear();
     }
 
     @EventHandler
@@ -408,7 +442,9 @@ public class Notifier extends Module {
         messageQueue.clear();
         pearlStartPosMap.clear();
         playerPositions.clear();
-        lastDeathMessages.clear();
+        recentDeaths.clear();
+        deathMessages.clear();
+        trackedEntityIds.clear();
     }
 
     @EventHandler
@@ -453,6 +489,22 @@ public class Notifier extends Module {
                     }
                 }
             }
+
+            case net.minecraft.network.packet.s2c.play.GameMessageS2CPacket packet when discordWebhookEnabled.get() && !webhookUrl.get().isEmpty() -> {
+                String message = packet.content().getString();
+
+                // Check if this is a death message and capture it
+                if (isDeathMessage(message)) {
+                    for (PlayerEntity player : mc.world.getPlayers()) {
+                        String playerName = player.getName().getString();
+                        if (message.contains(playerName)) {
+                            deathMessages.put(player.getUuid(), message);
+                            break;
+                        }
+                    }
+                }
+            }
+
             default -> {}
         }
     }
@@ -488,42 +540,32 @@ public class Notifier extends Module {
 
         // Discord webhook death and movement detection
         if (discordWebhookEnabled.get() && !webhookUrl.get().isEmpty()) {
-            // Check for player deaths
+            // Check for player deaths with improved deduplication
             if (discordPlayerDeath.get() || discordOtherPlayerDeath.get()) {
+                // Check for newly dead players
                 for (PlayerEntity player : mc.world.getPlayers()) {
-                    if (player.deathTime > 0 || player.getHealth() <= 0) {
-                        UUID uuid = player.getUuid();
-                        String deathKey = uuid.toString() + "_" + System.currentTimeMillis() / 1000; // Per second check
+                    UUID uuid = player.getUuid();
 
-                        // Only send once per death
-                        if (!lastDeathMessages.containsKey(uuid) || !lastDeathMessages.get(uuid).equals(deathKey)) {
-                            lastDeathMessages.put(uuid, deathKey);
+                    // Player just died (deathTime == 1 means first tick of death)
+                    if (player.deathTime == 1 && !recentDeaths.contains(uuid)) {
+                        recentDeaths.add(uuid);
+                        boolean isOwnPlayer = player.equals(mc.player);
 
-                            boolean isOwnPlayer = player.equals(mc.player);
-                            if ((isOwnPlayer && discordPlayerDeath.get()) || (!isOwnPlayer && discordOtherPlayerDeath.get())) {
-                                sendPlayerDeathWebhook(player, isOwnPlayer);
-                            }
+                        if ((isOwnPlayer && discordPlayerDeath.get()) || (!isOwnPlayer && discordOtherPlayerDeath.get())) {
+                            String deathMessage = deathMessages.getOrDefault(uuid, null);
+                            sendPlayerDeathWebhook(player, isOwnPlayer, deathMessage);
                         }
                     }
                 }
-            }
 
-            // Check for entity deaths
-            if (discordEntityDeath.get()) {
-                for (Entity entity : mc.world.getEntities()) {
-                    if (entity instanceof PlayerEntity) continue; // Skip players
-                    if (!discordEntityTypes.get().contains(entity.getType())) continue;
-
-                    if (entity.isRemoved() && !entity.isAlive()) {
-                        UUID uuid = entity.getUuid();
-                        String deathKey = uuid.toString() + "_death";
-
-                        if (!lastDeathMessages.containsKey(uuid)) {
-                            lastDeathMessages.put(uuid, deathKey);
-                            sendEntityDeathWebhook(entity);
-                        }
-                    }
-                }
+                // Clean up recent deaths for players no longer in death animation
+                recentDeaths.removeIf(uuid -> {
+                    PlayerEntity player = mc.world.getPlayers().stream()
+                        .filter(p -> p.getUuid().equals(uuid))
+                        .findFirst()
+                        .orElse(null);
+                    return player == null || player.deathTime == 0;
+                });
             }
 
             // Track player movement
@@ -563,6 +605,24 @@ public class Notifier extends Module {
             return "Singleplayer";
         }
         return "Unknown";
+    }
+
+    private boolean isDeathMessage(String message) {
+        // Common death message patterns
+        String[] deathKeywords = {
+            " died", " was killed", " was slain", " was shot", " drowned",
+            " burned", " fell", " blew up", " suffocated", " withered",
+            " starved", " froze", " went up in flames", " walked into fire",
+            " discovered floor was lava", " fell out of the world"
+        };
+
+        String lowerMessage = message.toLowerCase();
+        for (String keyword : deathKeywords) {
+            if (lowerMessage.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // Discord Webhook Methods
@@ -645,10 +705,9 @@ public class Notifier extends Module {
         webhook.send();
     }
 
-    private void sendPlayerDeathWebhook(PlayerEntity player, boolean isOwnPlayer) {
+    private void sendPlayerDeathWebhook(PlayerEntity player, boolean isOwnPlayer, String deathMessage) {
         String title = isOwnPlayer ? "You Died!" : "Player Died";
-        String description = String.format("**%s** has died!",
-            player.getName().getString());
+        String description = deathMessage != null ? deathMessage : String.format("**%s** has died!", player.getName().getString());
 
         DiscordWebhook webhook = new DiscordWebhook(webhookUrl.get());
         webhook.setUsername("Meteor Notifier");
@@ -673,6 +732,11 @@ public class Notifier extends Module {
 
         webhook.addEmbed(embed);
         webhook.send();
+
+        // Clean up death message after sending
+        if (deathMessage != null) {
+            deathMessages.remove(player.getUuid());
+        }
     }
 
     private void sendEntityDeathWebhook(Entity entity) {
