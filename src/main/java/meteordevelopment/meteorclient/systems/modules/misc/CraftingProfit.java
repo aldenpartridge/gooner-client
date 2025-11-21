@@ -3,6 +3,9 @@ package meteordevelopment.meteorclient.systems.modules.misc;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.GuiThemes;
+import meteordevelopment.meteorclient.gui.widgets.WWidget;
+import meteordevelopment.meteorclient.gui.widgets.containers.WHorizontalList;
+import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Categories;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -107,6 +110,21 @@ public class CraftingProfit extends Module {
     }
 
     @Override
+    public WWidget getWidget(GuiTheme theme) {
+        WHorizontalList list = theme.horizontalList();
+
+        // Open Results button
+        WButton openResultsBtn = list.add(theme.button("Open Results Screen")).expandX().widget();
+        openResultsBtn.action = this::openGui;
+
+        // Refresh button
+        WButton refreshBtn = list.add(theme.button("Refresh Prices")).expandX().widget();
+        refreshBtn.action = this::refreshPrices;
+
+        return list;
+    }
+
+    @Override
     public void onActivate() {
         if (apiKey.get().isEmpty()) {
             error("Please set your API key in the module settings! Get it with /api in-game.");
@@ -114,11 +132,7 @@ public class CraftingProfit extends Module {
             return;
         }
 
-        if (openGuiOnActivate.get() && mc.currentScreen == null) {
-            openGui();
-        }
-
-        // Initial refresh
+        // Initial refresh (GUI will open when refresh completes)
         refreshPrices();
     }
 
@@ -157,6 +171,11 @@ public class CraftingProfit extends Module {
                 calculateProfitableCrafts();
                 lastRefreshTime = System.currentTimeMillis();
                 info("Found " + profitableRecipesFound + " profitable crafts out of " + totalRecipesChecked + " recipes!");
+
+                // Open GUI after refresh completes (if setting enabled)
+                if (openGuiOnActivate.get()) {
+                    mc.execute(this::openGui);
+                }
             } catch (Exception e) {
                 lastError = e.getMessage();
                 error("Failed to refresh prices: " + e.getMessage());
