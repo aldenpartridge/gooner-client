@@ -534,7 +534,7 @@ public class Notifier extends Module {
                     if (player instanceof FakePlayerEntity) continue;
 
                     UUID uuid = player.getUuid();
-                    Vec3d currentPos = player.getPos();
+                    Vec3d currentPos = new Vec3d(player.getX(), player.getY(), player.getZ());
 
                     if (playerPositions.containsKey(uuid)) {
                         Vec3d lastPos = playerPositions.get(uuid);
