@@ -375,7 +375,7 @@ public class Notifier extends Module {
         .build()
     );
 
-    private final Setting<Set<net.minecraft.block.Block>> discordTrackedBlocks = sgDiscord.add(new BlockListSetting.Builder()
+    private final Setting<List<net.minecraft.block.Block>> discordTrackedBlocks = sgDiscord.add(new BlockListSetting.Builder()
         .name("tracked-blocks")
         .description("Only notify when these blocks are broken. Leave empty to track all blocks.")
         .visible(() -> discordWebhookEnabled.get() && discordBlockBreaking.get())
@@ -672,7 +672,7 @@ public class Notifier extends Module {
                     }
 
                     // Check if block is in tracked list (if list is not empty)
-                    Set<Block> trackedBlocks = discordTrackedBlocks.get();
+                    List<Block> trackedBlocks = discordTrackedBlocks.get();
                     if (!trackedBlocks.isEmpty() && !trackedBlocks.contains(oldState.getBlock())) {
                         return;
                     }
@@ -846,7 +846,9 @@ public class Notifier extends Module {
         if (discordIncludeGameMode.get() && entered) {
             PlayerListEntry entry = mc.player.networkHandler.getPlayerListEntry(player.getUuid());
             if (entry != null && entry.getGameMode() != null) {
-                embed.addField("Game Mode", entry.getGameMode().getName(), true);
+                String gameModeName = entry.getGameMode().name().substring(0, 1).toUpperCase() +
+                                      entry.getGameMode().name().substring(1).toLowerCase();
+                embed.addField("Game Mode", gameModeName, true);
             }
         }
 
@@ -887,7 +889,7 @@ public class Notifier extends Module {
         if (discordIncludeElytra.get() && entered) {
             ItemStack chestplate = player.getEquippedStack(EquipmentSlot.CHEST);
             boolean wearingElytra = chestplate.isOf(Items.ELYTRA);
-            boolean isFlyingWithElytra = player.isFallFlying();
+            boolean isFlyingWithElytra = player.isGliding();
 
             if (wearingElytra) {
                 String elytraStatus = isFlyingWithElytra ? "✈️ Flying with Elytra" : "Wearing Elytra (not flying)";
