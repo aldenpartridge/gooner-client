@@ -1,15 +1,38 @@
 # Action Macros System
 
-A comprehensive system for recording and playing back sequences of player actions in Meteor Client.
+A comprehensive system for recording and playing back sequences of player actions in Meteor Client with **anticheat-safe playback**.
 
 ## Overview
 
 The Action Macros system allows you to:
 - Record sequences of actions (movement, mining, dropping items, etc.)
 - Save macros with persistent storage
-- Play back recorded macros at adjustable speeds
+- Play back recorded macros with smooth, anticheat-safe movement and rotation
+- Adjust playback speed and smoothness to avoid detection
 - Loop macro playback
 - Integrate macros with other modules (e.g., trigger macros when player detected)
+
+## ⚠️ Anticheat Safety
+
+The macro system is designed to be anticheat-safe:
+
+### Movement
+- **Does NOT teleport** - Uses smooth velocity-based movement instead of instant position changes
+- **Respects physics** - Applies velocity gradually to simulate realistic player movement
+- **Configurable smoothness** - Adjust `movement-smoothness` (0.1-2.0) based on anticheat strictness
+  - Lower values (0.1-0.5) = Smoother, more legit-looking movement (recommended for strict anticheats)
+  - Higher values (1.0-2.0) = Faster, more aggressive movement (use only on lenient servers)
+
+### Rotation
+- **Smooth rotation** - Uses the built-in `Rotations` utility for gradual, realistic camera movement
+- **No instant snapping** - Rotations are interpolated over time instead of snapping instantly
+
+### Recommendations
+1. **Test in singleplayer first** to see how the macro looks
+2. **Start with low smoothness (0.3-0.5)** and increase if needed
+3. **Reduce playback speed (0.5x)** for extra safety on strict anticheats
+4. **Avoid extreme movements** - Don't record macros with impossible speeds or actions
+5. **Use realistic timings** - Record macros at normal playing speed
 
 ## Components
 
@@ -29,6 +52,7 @@ The main module for recording and playing back macros.
 - **playback-macro**: Name of the macro to play back
 - **playback-speed**: Speed multiplier for playback (1.0 = normal speed)
 - **loop-playback**: Loop the macro continuously
+- **movement-smoothness**: Controls playback smoothness (0.1-2.0). Lower = smoother/more legit, higher = faster. Default: 0.5
 
 ### 2. ActionMacro Command
 Command: `.action-macro`, `.amacro`, or `.am`

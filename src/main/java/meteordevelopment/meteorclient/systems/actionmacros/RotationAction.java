@@ -5,12 +5,13 @@
 
 package meteordevelopment.meteorclient.systems.actionmacros;
 
+import meteordevelopment.meteorclient.utils.player.Rotations;
 import net.minecraft.nbt.NbtCompound;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 
 /**
- * Records and replays player rotation (looking around).
+ * Records and replays player rotation using smooth, anticheat-safe rotation.
  */
 public class RotationAction extends RecordedAction {
     private float yaw;
@@ -31,8 +32,10 @@ public class RotationAction extends RecordedAction {
     @Override
     public boolean execute() {
         if (mc.player == null) return false;
-        mc.player.setYaw(yaw);
-        mc.player.setPitch(pitch);
+
+        // Use Rotations utility for smooth, anticheat-safe rotation
+        // This smoothly rotates the player instead of instantly snapping
+        Rotations.rotate(yaw, pitch);
         return true;
     }
 

@@ -114,6 +114,15 @@ public class MacroRecorder extends Module {
         .build()
     );
 
+    private final Setting<Double> movementSmoothness = sgPlayback.add(new DoubleSetting.Builder()
+        .name("movement-smoothness")
+        .description("Controls how smooth movement playback is. Lower = smoother/more legit, higher = faster/more aggressive. Adjust based on anticheat strictness.")
+        .defaultValue(0.5)
+        .min(0.1)
+        .sliderMax(2.0)
+        .build()
+    );
+
     // Recording state
     private boolean isRecording = false;
     private ActionMacro currentMacro;
@@ -237,6 +246,7 @@ public class MacroRecorder extends Module {
                     currentMacro.addAction(new MovementAction(
                         timestamp,
                         mc.player.getEntityPos(),
+                        mc.player.getVelocity(),
                         mc.player.isOnGround()
                     ));
                 }
@@ -357,6 +367,10 @@ public class MacroRecorder extends Module {
 
     public boolean isPlaying() {
         return isPlaying;
+    }
+
+    public double getMovementSmoothness() {
+        return movementSmoothness.get();
     }
 
     public void addDisconnectAction() {
