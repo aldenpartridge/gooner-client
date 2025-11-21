@@ -62,7 +62,7 @@ public class CraftingProfit extends Module {
     private final Setting<Double> minProfit = sgFilters.add(new DoubleSetting.Builder()
         .name("min-profit")
         .description("Minimum profit to display.")
-        .defaultValue(100.0)
+        .defaultValue(0.01)
         .min(0)
         .sliderMax(10000)
         .build()
@@ -71,7 +71,7 @@ public class CraftingProfit extends Module {
     private final Setting<Double> minProfitPercent = sgFilters.add(new DoubleSetting.Builder()
         .name("min-profit-percent")
         .description("Minimum profit percentage to display.")
-        .defaultValue(5.0)
+        .defaultValue(0.0)
         .min(0)
         .sliderMax(100)
         .build()
@@ -235,14 +235,25 @@ public class CraftingProfit extends Module {
                 .sendJson(DonutAuctionResponse.class);
 
             if (response != null && response.status == 200 && response.result != null && !response.result.isEmpty()) {
-                // Get the first result (lowest price)
-                DonutAuctionResponse.AuctionEntry firstEntry = response.result.get(0);
+                // Search through all results on first page to find exact match
+                for (DonutAuctionResponse.AuctionEntry entry : response.result) {
+                    if (entry.item != null && entry.item.id != null) {
+                        String entryItemId = CraftingRecipe.normalizeId(entry.item.id);
 
-                // Verify the item ID matches what we searched for
+                        // Check for exact match
+                        if (entryItemId.equalsIgnoreCase(itemId)) {
+                            // Calculate price per item
+                            double pricePerItem = entry.price / entry.item.count;
+                            return pricePerItem;
+                        }
+                    }
+                }
+
+                // If no exact match found, try first result if it contains our search term
+                DonutAuctionResponse.AuctionEntry firstEntry = response.result.get(0);
                 if (firstEntry.item != null && firstEntry.item.id != null) {
                     String entryItemId = CraftingRecipe.normalizeId(firstEntry.item.id);
-                    if (entryItemId.equalsIgnoreCase(itemId)) {
-                        // Calculate price per item
+                    if (entryItemId.contains(itemId) || itemId.contains(entryItemId)) {
                         double pricePerItem = firstEntry.price / firstEntry.item.count;
                         return pricePerItem;
                     }
@@ -257,32 +268,52 @@ public class CraftingProfit extends Module {
     }
 
     private void calculateProfitableCrafts() {
-        List<ProfitableCraft> crafts = new ArrayList<>();
+        List<ProfitableCraft> allCrafts = new ArrayList<>();
         List<CraftingRecipe> recipes = RecipeDatabase.getAllRecipes();
         totalRecipesChecked = recipes.size();
         profitableRecipesFound = 0;
+        int skippedMissingPrices = 0;
 
         for (CraftingRecipe recipe : recipes) {
             ProfitableCraft craft = calculateCraftProfit(recipe);
             if (craft != null) {
-                if (!showOnlyProfitable.get() || craft.isProfitable()) {
-                    if (craft.profit >= minProfit.get() && craft.profitPercentage >= minProfitPercent.get()) {
-                        crafts.add(craft);
-                        if (craft.isProfitable()) profitableRecipesFound++;
-                    }
+                allCrafts.add(craft);
+                if (craft.isProfitable()) profitableRecipesFound++;
+            } else {
+                skippedMissingPrices++;
+            }
+        }
+
+        info("Calculated " + allCrafts.size() + " crafts (" + profitableRecipesFound + " profitable, " + skippedMissingPrices + " skipped due to missing prices)");
+
+        // Sort by profit (descending)
+        Collections.sort(allCrafts);
+
+        // Apply filters
+        List<ProfitableCraft> filteredCrafts = new ArrayList<>();
+        for (ProfitableCraft craft : allCrafts) {
+            if (!showOnlyProfitable.get() || craft.isProfitable()) {
+                if (craft.profit >= minProfit.get() && craft.profitPercentage >= minProfitPercent.get()) {
+                    filteredCrafts.add(craft);
                 }
             }
         }
 
-        // Sort by profit
-        Collections.sort(crafts);
-
         // Limit results
-        if (crafts.size() > maxResults.get()) {
-            crafts = crafts.subList(0, maxResults.get());
+        if (filteredCrafts.size() > maxResults.get()) {
+            filteredCrafts = filteredCrafts.subList(0, maxResults.get());
         }
 
-        profitableCrafts = crafts;
+        profitableCrafts = filteredCrafts;
+
+        // Show top 5 regardless of filters for debugging
+        if (allCrafts.size() > 0) {
+            info("Top 5 crafts by profit:");
+            for (int i = 0; i < Math.min(5, allCrafts.size()); i++) {
+                ProfitableCraft craft = allCrafts.get(i);
+                info("  " + (i+1) + ". " + craft.toString());
+            }
+        }
     }
 
     private ProfitableCraft calculateCraftProfit(CraftingRecipe recipe) {
