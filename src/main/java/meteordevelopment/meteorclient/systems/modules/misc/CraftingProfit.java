@@ -22,7 +22,7 @@ public class CraftingProfit extends Module {
     private final Setting<String> apiKey = sgGeneral.add(new StringSetting.Builder()
         .name("api-key")
         .description("Your DonutSMP API key from /api command.")
-        .defaultValue("")
+        .defaultValue("ec239e2e3b7648cd92f91076554c93bf")
         .build()
     );
 
