@@ -83,9 +83,9 @@ public class CraftingProfit extends Module {
     private final Setting<Integer> maxResults = sgFilters.add(new IntSetting.Builder()
         .name("max-results")
         .description("Maximum number of profitable crafts to display.")
-        .defaultValue(50)
+        .defaultValue(20)
         .min(1)
-        .sliderMax(200)
+        .sliderMax(100)
         .build()
     );
 
@@ -244,7 +244,8 @@ public class CraftingProfit extends Module {
             // Query first page sorted by lowest price for this specific item
             String url = "https://api.donutsmp.net/v1/auction/list/1";
 
-            // Create search request body (API uses GET with body, which is non-standard but supported)
+            // IMPORTANT: We use lowest_price for both buying materials AND selling crafted items
+            // This represents the current competitive market price for quick sales
             String requestBody = "{\"search\":\"" + itemId + "\",\"sort\":\"lowest_price\"}";
 
             DonutAuctionResponse response = Http.get(url)
@@ -254,7 +255,9 @@ public class CraftingProfit extends Module {
                 .sendJson(DonutAuctionResponse.class);
 
             if (response != null && response.status == 200 && response.result != null && !response.result.isEmpty()) {
-                // Search through all results on first page to find exact match
+                Double lowestPriceFound = null;
+
+                // Search through all results on first page to find exact match with lowest price
                 for (DonutAuctionResponse.AuctionEntry entry : response.result) {
                     if (entry.item != null && entry.item.id != null) {
                         String entryItemId = CraftingRecipe.normalizeId(entry.item.id);
@@ -263,9 +266,18 @@ public class CraftingProfit extends Module {
                         if (entryItemId.equalsIgnoreCase(itemId)) {
                             // Calculate price per item
                             double pricePerItem = entry.price / entry.item.count;
-                            return pricePerItem;
+
+                            // Keep track of the lowest price found
+                            if (lowestPriceFound == null || pricePerItem < lowestPriceFound) {
+                                lowestPriceFound = pricePerItem;
+                            }
                         }
                     }
+                }
+
+                // Return the lowest price if we found exact matches
+                if (lowestPriceFound != null) {
+                    return lowestPriceFound;
                 }
 
                 // If no exact match found, try first result if it contains our search term
@@ -410,6 +422,14 @@ public class CraftingProfit extends Module {
 
     public int getItemPricesCount() {
         return itemPrices.size();
+    }
+
+    public void setMaxResults(int count) {
+        maxResults.set(count);
+        // Recalculate with new limit
+        if (!profitableCrafts.isEmpty()) {
+            calculateProfitableCrafts();
+        }
     }
 
     @Override

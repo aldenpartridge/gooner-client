@@ -32,6 +32,31 @@ public class CraftingProfitScreenImpl extends WindowScreen {
         header.add(theme.label(statusText));
         header.add(theme.horizontalSeparator()).expandX();
 
+        // Quick filter buttons for common result counts
+        header.add(theme.label("Show: "));
+        WButton top5Btn = header.add(theme.button("Top 5")).widget();
+        top5Btn.action = () -> {
+            module.setMaxResults(5);
+            reload();
+        };
+        WButton top10Btn = header.add(theme.button("Top 10")).widget();
+        top10Btn.action = () -> {
+            module.setMaxResults(10);
+            reload();
+        };
+        WButton top20Btn = header.add(theme.button("Top 20")).widget();
+        top20Btn.action = () -> {
+            module.setMaxResults(20);
+            reload();
+        };
+        WButton allBtn = header.add(theme.button("All")).widget();
+        allBtn.action = () -> {
+            module.setMaxResults(100);
+            reload();
+        };
+
+        header.add(theme.horizontalSeparator()).expandX();
+
         WButton refreshBtn = header.add(theme.button("Refresh")).widget();
         refreshBtn.action = () -> {
             module.refreshPrices();
@@ -97,31 +122,51 @@ public class CraftingProfitScreenImpl extends WindowScreen {
     }
 
     private void addCraftRow(int rank, ProfitableCraft craft) {
+        // Calculate color based on profit percentage (gradient from dark green to bright green)
+        String profitColor = getProfitColor(craft.profitPercentage);
+
         // Rank
-        craftTable.add(theme.label(String.valueOf(rank)));
+        craftTable.add(theme.label(String.format("§f%d", rank))).expandCellX();
 
         // Item name
-        craftTable.add(theme.label(craft.recipe.resultName + " x" + craft.recipe.resultCount));
+        craftTable.add(theme.label(String.format("§f%s §7x%d",
+            craft.recipe.resultName, craft.recipe.resultCount))).expandCellX();
 
-        // Cost
-        String costColor = "§7";
-        craftTable.add(theme.label(costColor + "$" + craft.getFormattedCost()));
+        // Cost (gray)
+        craftTable.add(theme.label(String.format("§7$%s", craft.getFormattedCost()))).expandCellX();
 
-        // Sell price
-        craftTable.add(theme.label("§7$" + craft.getFormattedSellPrice()));
+        // Sell price (gray)
+        craftTable.add(theme.label(String.format("§7$%s", craft.getFormattedSellPrice()))).expandCellX();
 
-        // Profit (colored)
-        String profitColor = craft.isProfitable() ? "§a" : "§c";
-        craftTable.add(theme.label(profitColor + "$" + craft.getFormattedProfit()));
+        // Profit (colored with gradient)
+        craftTable.add(theme.label(String.format("%s$%s", profitColor, craft.getFormattedProfit()))).expandCellX();
 
-        // Percentage (colored)
-        craftTable.add(theme.label(profitColor + craft.getFormattedProfitPercentage()));
+        // Percentage (colored with gradient)
+        craftTable.add(theme.label(String.format("%s%s", profitColor, craft.getFormattedProfitPercentage()))).expandCellX();
 
         // Recipe details
         WButton detailsBtn = craftTable.add(theme.button("Details")).widget();
         detailsBtn.action = () -> showRecipeDetails(craft);
 
         craftTable.row();
+    }
+
+    /**
+     * Returns a color code based on profit percentage
+     * Green gradient: darker green for low profit, brighter green for high profit
+     */
+    private String getProfitColor(double profitPercentage) {
+        if (profitPercentage <= 0) {
+            return "§c"; // Red for losses
+        } else if (profitPercentage < 5) {
+            return "§2"; // Dark green (0-5%)
+        } else if (profitPercentage < 15) {
+            return "§a"; // Green (5-15%)
+        } else if (profitPercentage < 30) {
+            return "§a§l"; // Bold green (15-30%)
+        } else {
+            return "§a§n"; // Bright underlined green (30%+)
+        }
     }
 
     private void showRecipeDetails(ProfitableCraft craft) {
