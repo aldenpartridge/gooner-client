@@ -43,7 +43,7 @@ public class ActionMacroCommand extends Command {
                         }
 
                         // Set the macro name and start recording
-                        recorder.settings.getGroup("general").get("macro-name").set(name);
+                        recorder.macroName.set(name);
 
                         if (!recorder.isActive()) {
                             recorder.toggle();

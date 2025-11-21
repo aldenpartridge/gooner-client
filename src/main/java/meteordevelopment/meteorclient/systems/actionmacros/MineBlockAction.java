@@ -28,14 +28,15 @@ public class MineBlockAction extends RecordedAction {
     }
 
     public MineBlockAction(NbtCompound tag) {
-        super(tag.getLong("timestamp"));
+        super(tag.getLong("timestamp").orElse(0L));
         this.blockPos = new BlockPos(
-            tag.getInt("x"),
-            tag.getInt("y"),
-            tag.getInt("z")
+            tag.getInt("x").orElse(0),
+            tag.getInt("y").orElse(0),
+            tag.getInt("z").orElse(0)
         );
-        this.direction = Direction.byId(tag.getInt("direction"));
-        this.isStart = tag.getBoolean("isStart");
+        int dirId = tag.getInt("direction").orElse(0);
+        this.direction = Direction.values()[dirId];
+        this.isStart = tag.getBoolean("isStart").orElse(false);
     }
 
     @Override
@@ -62,7 +63,7 @@ public class MineBlockAction extends RecordedAction {
         tag.putInt("x", blockPos.getX());
         tag.putInt("y", blockPos.getY());
         tag.putInt("z", blockPos.getZ());
-        tag.putInt("direction", direction.getId());
+        tag.putInt("direction", direction.ordinal());
         tag.putBoolean("isStart", isStart);
     }
 

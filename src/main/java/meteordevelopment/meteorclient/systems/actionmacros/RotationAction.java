@@ -23,9 +23,9 @@ public class RotationAction extends RecordedAction {
     }
 
     public RotationAction(NbtCompound tag) {
-        super(tag.getLong("timestamp"));
-        this.yaw = tag.getFloat("yaw");
-        this.pitch = tag.getFloat("pitch");
+        super(tag.getLong("timestamp").orElse(0L));
+        this.yaw = tag.getFloat("yaw").orElse(0f);
+        this.pitch = tag.getFloat("pitch").orElse(0f);
     }
 
     @Override

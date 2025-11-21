@@ -9,6 +9,7 @@ import meteordevelopment.meteorclient.systems.System;
 import meteordevelopment.meteorclient.systems.Systems;
 import meteordevelopment.meteorclient.utils.misc.NbtUtils;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.NbtElement;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
@@ -69,7 +70,14 @@ public class ActionMacros extends System<ActionMacros> implements Iterable<Actio
 
     @Override
     public ActionMacros fromTag(NbtCompound tag) {
-        macros = NbtUtils.listFromTag(tag.getListOrEmpty("macros"), ActionMacro::new);
+        macros.clear();
+        for (NbtElement element : tag.getListOrEmpty("macros")) {
+            if (element instanceof NbtCompound) {
+                ActionMacro macro = new ActionMacro();
+                macro.fromTag((NbtCompound) element);
+                macros.add(macro);
+            }
+        }
         return this;
     }
 }

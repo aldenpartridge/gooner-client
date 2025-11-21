@@ -31,7 +31,7 @@ public class MacroRecorder extends Module {
     private final SettingGroup sgPlayback = settings.createGroup("Playback");
 
     // General settings
-    private final Setting<String> macroName = sgGeneral.add(new StringSetting.Builder()
+    public final Setting<String> macroName = sgGeneral.add(new StringSetting.Builder()
         .name("macro-name")
         .description("Name of the current macro.")
         .defaultValue("my_macro")
@@ -236,7 +236,7 @@ public class MacroRecorder extends Module {
                 if (recordMovement.get()) {
                     currentMacro.addAction(new MovementAction(
                         timestamp,
-                        mc.player.getPos(),
+                        mc.player.getEntityPos(),
                         mc.player.isOnGround()
                     ));
                 }
@@ -317,7 +317,7 @@ public class MacroRecorder extends Module {
             long timestamp = System.currentTimeMillis() - recordingStartTime;
             // Find which slot the item came from (simplified - uses selected slot)
             if (mc.player != null) {
-                int slot = mc.player.getInventory().selectedSlot;
+                int slot = mc.player.getInventory().getSelectedSlot();
                 currentMacro.addAction(new DropItemAction(timestamp, slot, false));
             }
         }

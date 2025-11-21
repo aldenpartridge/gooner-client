@@ -24,13 +24,13 @@ public class MovementAction extends RecordedAction {
     }
 
     public MovementAction(NbtCompound tag) {
-        super(tag.getLong("timestamp"));
+        super(tag.getLong("timestamp").orElse(0L));
         this.position = new Vec3d(
-            tag.getDouble("x"),
-            tag.getDouble("y"),
-            tag.getDouble("z")
+            tag.getDouble("x").orElse(0.0),
+            tag.getDouble("y").orElse(0.0),
+            tag.getDouble("z").orElse(0.0)
         );
-        this.onGround = tag.getBoolean("onGround");
+        this.onGround = tag.getBoolean("onGround").orElse(false);
     }
 
     @Override

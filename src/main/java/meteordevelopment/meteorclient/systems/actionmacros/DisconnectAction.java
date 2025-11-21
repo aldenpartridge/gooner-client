@@ -5,10 +5,8 @@
 
 package meteordevelopment.meteorclient.systems.actionmacros;
 
-import net.minecraft.client.gui.screen.DisconnectedScreen;
-import net.minecraft.client.gui.screen.TitleScreen;
-import net.minecraft.client.gui.screen.multiplayer.MultiplayerScreen;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.network.packet.s2c.common.DisconnectS2CPacket;
 import net.minecraft.text.Text;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
@@ -25,25 +23,16 @@ public class DisconnectAction extends RecordedAction {
     }
 
     public DisconnectAction(NbtCompound tag) {
-        super(tag.getLong("timestamp"));
-        this.reason = tag.getString("reason");
+        super(tag.getLong("timestamp").orElse(0L));
+        this.reason = tag.getString("reason").orElse("Macro disconnect");
     }
 
     @Override
     public boolean execute() {
-        if (mc.world == null) return false;
+        if (mc.player == null || mc.player.networkHandler == null) return false;
 
-        mc.world.disconnect();
-
-        if (mc.getNetworkHandler() != null) {
-            mc.getNetworkHandler().getConnection().disconnect(Text.literal(reason));
-        }
-
-        mc.disconnect(new DisconnectedScreen(
-            new MultiplayerScreen(new TitleScreen()),
-            Text.literal("Disconnected"),
-            Text.literal(reason)
-        ));
+        Text text = Text.literal("[Macro] ").append(Text.literal(reason));
+        mc.player.networkHandler.onDisconnect(new DisconnectS2CPacket(text));
         return true;
     }
 

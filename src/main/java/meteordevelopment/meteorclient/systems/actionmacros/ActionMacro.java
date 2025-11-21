@@ -67,16 +67,16 @@ public class ActionMacro implements ISerializable<ActionMacro> {
 
     @Override
     public ActionMacro fromTag(NbtCompound tag) {
-        name = tag.getString("name");
-        description = tag.getString("description");
+        name = tag.getString("name").orElse("");
+        description = tag.getString("description").orElse("");
 
         actions.clear();
-        NbtList actionsTag = tag.getList("actions", NbtElement.COMPOUND_TYPE);
-        for (int i = 0; i < actionsTag.size(); i++) {
-            NbtCompound actionTag = actionsTag.getCompound(i);
-            RecordedAction action = deserializeAction(actionTag);
-            if (action != null) {
-                actions.add(action);
+        for (NbtElement element : tag.getListOrEmpty("actions")) {
+            if (element instanceof NbtCompound actionTag) {
+                RecordedAction action = deserializeAction(actionTag);
+                if (action != null) {
+                    actions.add(action);
+                }
             }
         }
 
@@ -84,7 +84,7 @@ public class ActionMacro implements ISerializable<ActionMacro> {
     }
 
     private RecordedAction deserializeAction(NbtCompound tag) {
-        String typeStr = tag.getString("type");
+        String typeStr = tag.getString("type").orElse("");
         RecordedAction.ActionType type;
 
         try {

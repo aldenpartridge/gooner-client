@@ -24,9 +24,9 @@ public class DropItemAction extends RecordedAction {
     }
 
     public DropItemAction(NbtCompound tag) {
-        super(tag.getLong("timestamp"));
-        this.slot = tag.getInt("slot");
-        this.dropAll = tag.getBoolean("dropAll");
+        super(tag.getLong("timestamp").orElse(0L));
+        this.slot = tag.getInt("slot").orElse(0);
+        this.dropAll = tag.getBoolean("dropAll").orElse(false);
     }
 
     @Override
